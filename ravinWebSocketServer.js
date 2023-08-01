@@ -2,8 +2,6 @@
 
 var WebSocketServer = require('websocket').server;
 var http = require('http');
-const axios = require('axios');
-const crypto = require('crypto');
 
 var clientsConnected = [];
 
@@ -63,10 +61,40 @@ wsServer.on('request', function(request) {
                 return;
             }
 
-            console.log(message);
+            const action = dados.action;
+            switch(action) {
+                case "login":
+                    doLogin(data.params.table, connection);
+                    answerMessage = formatMessage("loginAnswer", 'success');
+                    connection.sendUTF(answerMessage);
+                    break;
+            }
         }
     });
 });
+
+function getIndexByConnection(connection) {
+  let index;
+  clientsConnected.forEach(function(valor, chave) {
+    if (connection == valor) {
+      index = chave;
+    }
+  });
+
+  return index;
+}
+
+function doLogin(table, connection) {
+    var index = getIndexByConnection(connection);
+    if (index === false) {
+        let mensagem = formatMessage("erro", "Erro ao efetuar login");
+        connection.sendUTF(mensagem);
+        console.log('Erro ao efetuar login, MESA ' + table);
+    } else {
+        connectedTables[index]['table'] = table;
+        console.log('Mesa online ' + table);
+    }
+}
 
 function formatMessage(action, data) {
 	
@@ -74,8 +102,9 @@ function formatMessage(action, data) {
 
     switch(action) {
         case 'erro':
+        case 'loginAnswer':
             mensagem = {"action":action,"params":{"msg":data}};
-        break;
+            break;
     }
 
     return JSON.stringify(mensagem);
