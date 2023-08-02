@@ -2,8 +2,11 @@
 
 var WebSocketServer = require('websocket').server;
 var http = require('http');
+var fetch = require("node-fetch");
 
-var clientsConnected = [];
+var tablesConnected = [];
+var kitchenConnected = {};
+var orders = [];
 
 //Cria o server
 var server = http.createServer(function(request, response) {
@@ -46,14 +49,14 @@ wsServer.on('upgrade', function (req, socket) {
 wsServer.on('request', function(request) {
 
     var connection = request.accept();
-    clientsConnected.push(connection);
+    tablesConnected.push(connection);
 
     //Quando recebe mensagem
     connection.on('message', function(message) {
 
         if (message.type === 'utf8') {
             try {
-                var dados = JSON.parse(message.utf8Data);
+                var data = JSON.parse(message.utf8Data);
             } catch (e) {
                 mensagem = formatMessage("erro", 'Formato da mensagem inválido, as mensagens devem ser no formato JSON e devem seguir o padrão de formatação, exemplo: {"action":"nomeDoMetodo","params":{"parametro":"1"}}');
                 connection.sendUTF(mensagem);
@@ -61,13 +64,39 @@ wsServer.on('request', function(request) {
                 return;
             }
 
-            const action = dados.action;
-            switch(action) {
+            const action = data.action;
+            switch (action) {
                 case "login":
                     doLogin(data.params.table, connection);
-                    answerMessage = formatMessage("loginAnswer", 'success');
+                    answerMessage = formatMessage("loginAnswer", "success");
                     connection.sendUTF(answerMessage);
                     break;
+                case "helloKitchen":
+                    message = formatMessage("helloKitchen", {"table": data.params.table, "message": "Hello Kitchen"});
+                    kitchenConnected.sendUTF(message);
+                    console.log("Mensagem enviada para a COZINHA, pela MESA " + data.params.table);
+                    break;
+                case "helloClient":
+                    const tableConnection = getConnectionByTable(data.params.table);
+                    message = formatMessage("helloClient", {"message": "Hello Client"});
+                    tableConnection.sendUTF(message);
+                    console.log("Mensagem enviada para a MESA "+ data.params.table +", pela COZINHA");
+                    break;
+                case "newOrder":
+                    const resultRequest = sendRequestOrder(data.params);
+                    resultRequest
+                        .then(() => {
+                            addNewTableOrder(data.params);
+                            message = formatMessage("newOrder", {"table": data.params.table, "item": data.params.item, "value": data.params.value, "quantity": data.params.quantity});
+                            kitchenConnected.sendUTF(message);
+                            console.log("Pedido da MESA " + data.params.table + " enviado a COZINHA");
+                        })
+                        .catch((error) => {
+                            const mesagem = formatMessage("rollBackOrder", data.params.item);
+                            connection.send(mesagem);
+                            console.log(error);
+                        })
+                    ;
             }
         }
     });
@@ -75,13 +104,38 @@ wsServer.on('request', function(request) {
 
 function getIndexByConnection(connection) {
   let index;
-  clientsConnected.forEach(function(valor, chave) {
+  tablesConnected.forEach(function(valor, chave) {
     if (connection == valor) {
       index = chave;
     }
   });
 
   return index;
+}
+
+function getConnectionByTable(tableName) {
+    for (tableConnected of tablesConnected) {
+        if (tableConnected['table'] == tableName) {
+            return tableConnected;
+        }
+    }
+}
+
+async function sendRequestOrder(order) {
+    const urlAPI = "https://64c7005c0a25021fde9207d4.mockapi.io/ravin/orders";
+    const request = await fetch(urlAPI, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(order)
+    })
+    
+    return request.json();
+}
+
+function addNewTableOrder(order) {
+    orders[order.table] = order;
 }
 
 function doLogin(table, connection) {
@@ -91,21 +145,36 @@ function doLogin(table, connection) {
         connection.sendUTF(mensagem);
         console.log('Erro ao efetuar login, MESA ' + table);
     } else {
-        connectedTables[index]['table'] = table;
-        console.log('Mesa online ' + table);
+        if (table === "kitchen") {
+            kitchenConnected = connection;
+            console.log('Cozinha online');
+        } else {
+            tablesConnected[index]['table'] = table;
+            console.log('Mesa online ' + table);
+        }
     }
 }
 
 function formatMessage(action, data) {
 	
-    let mensagem;
+    let message;
 
     switch(action) {
         case 'erro':
         case 'loginAnswer':
-            mensagem = {"action":action,"params":{"msg":data}};
+            message = {"action": action, "params": {"msg": data}};
+            break;
+        case 'helloKitchen':
+        case 'helloClient':
+            message = {"action": action, "params": {"table": data.table, "msg": data.message}}
+            break;
+        case 'newOrder':
+            message = {"action": action, "params": data};
+            break;
+        case 'rollBackOrder':
+            message = {"action": action, "params": {"item": data}};
             break;
     }
 
-    return JSON.stringify(mensagem);
+    return JSON.stringify(message);
 }
