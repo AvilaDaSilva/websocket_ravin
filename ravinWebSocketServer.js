@@ -85,9 +85,9 @@ wsServer.on('request', function(request) {
                 case "newOrder":
                     const resultRequest = sendRequestOrder(data.params);
                     resultRequest
-                        .then(() => {
-                            addNewTableOrder(data.params);
-                            message = formatMessage("newOrder", {"table": data.params.table, "item": data.params.item, "value": data.params.value, "quantity": data.params.quantity});
+                        .then((response) => {
+                            addNewTableOrder(response);
+                            message = formatMessage("newOrder", {"table": data.params.table, "id": response.id, "item": data.params.item, "value": data.params.value, "quantity": data.params.quantity});
                             kitchenConnected.sendUTF(message);
                             console.log("Pedido da MESA " + data.params.table + " enviado a COZINHA");
                         })
@@ -97,6 +97,14 @@ wsServer.on('request', function(request) {
                             console.log(error);
                         })
                     ;
+                    break;
+                case "alterStatusOrder":
+                    const tableConnectionStatus = getConnectionByTable(data.params.table);
+                    answerMessage = formatMessage("statusOrder", {"status": data.params.status, "item": data.params.item});
+                    tableConnectionStatus.sendUTF(answerMessage);
+                    console.log("Alterando status pedido para "+ data.params.status);
+                    console.log(data.params.table);
+                    break;
             }
         }
     });
@@ -135,7 +143,8 @@ async function sendRequestOrder(order) {
 }
 
 function addNewTableOrder(order) {
-    orders[order.table] = order;
+    orders[order.table] = [order.id];
+    orders[order.table][order.id] = order;
 }
 
 function doLogin(table, connection) {
@@ -174,6 +183,8 @@ function formatMessage(action, data) {
         case 'rollBackOrder':
             message = {"action": action, "params": {"item": data}};
             break;
+        case 'statusOrder':
+            message = {"action": action, "params": {"status": data.status, "item": data.item}};
     }
 
     return JSON.stringify(message);
